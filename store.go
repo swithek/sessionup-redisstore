@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/gomodule/redigo/redis"
@@ -37,7 +38,7 @@ func (r *RedisStore) Create(ctx context.Context, s sessionup.Session) error {
 
 	defer c.Close()
 
-	if err = c.Send("MULTI"); err != nil {
+	if _, err = c.Do("MULTI"); err != nil {
 		return err
 	}
 
@@ -45,7 +46,7 @@ func (r *RedisStore) Create(ctx context.Context, s sessionup.Session) error {
 	uKey := r.key(true, s.UserKey)
 
 	// remove expired sessions from user session set
-	err = c.Send("ZREMRANGEBYSCORE", uKey, "-inf", now)
+	_, err = c.Do("ZREMRANGEBYSCORE", uKey, "-inf", now)
 	if err != nil {
 		return err
 	}
@@ -56,7 +57,7 @@ func (r *RedisStore) Create(ctx context.Context, s sessionup.Session) error {
 		return err
 	}
 
-	uExpMilli += now
+	uExpMilli += now / 1000
 	sExpNano := s.ExpiresAt.UnixNano()
 	sExpMilli := sExpNano / 1000
 
@@ -65,41 +66,43 @@ func (r *RedisStore) Create(ctx context.Context, s sessionup.Session) error {
 	}
 
 	// add session to user session set
-	err = c.Send("ZADD", uKey, sExpNano, s.ID)
+	_, err = c.Do("ZADD", uKey, sExpNano, s.ID)
 	if err != nil {
 		return err
 	}
 
 	// update user session set's expiration time
-	err = c.Send("PEXPIREAT", uKey, uExpMilli)
+	_, err = c.Do("PEXPIREAT", uKey, uExpMilli)
 	if err != nil {
 		return err
 	}
 
 	sKey := r.key(false, s.ID)
 
-	// set session
-	err = c.Send(
+	// create session hash
+	_, err = c.Do(
 		"HMSET", sKey,
-		"CreatedAt", s.CreatedAt,
-		"ExpiresAt", s.ExpiresAt,
-		"ID", s.ID,
-		"UsetKey", s.UserKey,
-		"IP", s.IP,
-		"Agent.OS", s.Agent.OS,
-		"Agent.Browser", s.Agent.Browser,
+		"created_at", s.CreatedAt.Format(time.RFC3339Nano),
+		"expires_at", s.ExpiresAt.Format(time.RFC3339Nano),
+		"id", s.ID,
+		"user_key", s.UserKey,
+		"ip", s.IP.String(),
+		"agent_os", s.Agent.OS,
+		"agent_browser", s.Agent.Browser,
 	)
 	if err != nil {
 		return err
 	}
 
 	// set session's expiration time
-	err = c.Send("PEXPIREAT", sKey, sExpMilli)
+	_, err = c.Do("PEXPIREAT", sKey, sExpMilli)
 	if err != nil {
 		return err
 	}
 
-	return c.Send("EXEC")
+	_, err = c.Do("EXEC")
+
+	return err
 }
 
 // FetchByID retrieves a session from the store by the provided ID.
@@ -113,7 +116,7 @@ func (r *RedisStore) FetchByID(ctx context.Context, id string) (sessionup.Sessio
 
 	defer c.Close()
 
-	vv, err := redis.Values(c.Do("HGETALL", r.key(false, id)))
+	vv, err := redis.StringMap(c.Do("HGETALL", r.key(false, id)))
 	if err != nil {
 		if errors.Is(err, redis.ErrNil) {
 			err = nil
@@ -122,8 +125,8 @@ func (r *RedisStore) FetchByID(ctx context.Context, id string) (sessionup.Sessio
 		return sessionup.Session{}, false, err
 	}
 
-	var s sessionup.Session
-	if err = redis.ScanStruct(vv, &s); err != nil {
+	s, err := parse(vv)
+	if err != nil {
 		return sessionup.Session{}, false, err
 	}
 
@@ -140,7 +143,7 @@ func (r *RedisStore) FetchByUserKey(ctx context.Context, key string) ([]sessionu
 
 	defer c.Close()
 
-	if err = c.Send("MULTI"); err != nil {
+	if _, err = c.Do("MULTI"); err != nil {
 		return nil, err
 	}
 
@@ -156,20 +159,20 @@ func (r *RedisStore) FetchByUserKey(ctx context.Context, key string) ([]sessionu
 	var ss []sessionup.Session
 
 	for i := range ids {
-		vv, err := redis.Values(c.Do("HGETALL", r.key(false, ids[i])))
+		vv, err := redis.StringMap(c.Do("HGETALL", r.key(false, ids[i])))
 		if err != nil {
 			return nil, err
 		}
 
-		var s sessionup.Session
-		if err = redis.ScanStruct(vv, &s); err != nil {
+		s, err := parse(vv)
+		if err != nil {
 			return nil, err
 		}
 
 		ss = append(ss, s)
 	}
 
-	if err = c.Send("EXEC"); err != nil {
+	if _, err = c.Do("EXEC"); err != nil {
 		return nil, err
 	}
 
@@ -186,13 +189,13 @@ func (r *RedisStore) DeleteByID(ctx context.Context, id string) error {
 
 	defer c.Close()
 
-	if err = c.Send("MULTI"); err != nil {
+	if _, err = c.Do("MULTI"); err != nil {
 		return err
 	}
 
 	sKey := r.key(false, id)
 
-	vv, err := redis.Values(c.Do("HGETALL", sKey))
+	vv, err := redis.StringMap(c.Do("HGETALL", sKey))
 	if err != nil {
 		if errors.Is(err, redis.ErrNil) {
 			err = nil
@@ -201,20 +204,34 @@ func (r *RedisStore) DeleteByID(ctx context.Context, id string) error {
 		return err
 	}
 
-	var s sessionup.Session
-	if err = redis.ScanStruct(vv, &s); err != nil {
+	s, err := parse(vv)
+	if err != nil {
 		return err
 	}
 
-	if err = c.Send("ZREM", r.key(true, s.UserKey), sKey); err != nil {
+	uKey := r.key(true, s.UserKey)
+	if _, err = c.Do("ZREM", uKey, sKey); err != nil {
 		return err
 	}
 
-	if err = c.Send("DEL", sKey); err != nil {
+	count, err := redis.Int64(c.Do("ZCARD", uKey))
+	if err != nil {
 		return err
 	}
 
-	return c.Send("EXEC")
+	if count == 0 {
+		if _, err = c.Do("DEL", uKey); err != nil {
+			return err
+		}
+	}
+
+	if _, err = c.Do("DEL", sKey); err != nil {
+		return err
+	}
+
+	_, err = c.Do("EXEC")
+
+	return err
 }
 
 // DeleteByUserKey deletes all sessions associated with the provided
@@ -228,7 +245,7 @@ func (r *RedisStore) DeleteByUserKey(ctx context.Context, key string, expIDs ...
 
 	defer c.Close()
 
-	if err = c.Send("MULTI"); err != nil {
+	if _, err = c.Do("MULTI"); err != nil {
 		return err
 	}
 
@@ -236,11 +253,9 @@ func (r *RedisStore) DeleteByUserKey(ctx context.Context, key string, expIDs ...
 
 	ids, err := redis.Strings(c.Do("ZRANGEBYSCORE", uKey, "-inf", "+inf"))
 	if err != nil {
-		if errors.Is(err, redis.ErrNil) {
-			err = nil
+		if !errors.Is(err, redis.ErrNil) {
+			return err
 		}
-
-		return err
 	}
 
 Outer:
@@ -251,18 +266,20 @@ Outer:
 			}
 		}
 
-		if err = c.Send("DEL", r.key(false, ids[i])); err != nil {
+		if _, err = c.Do("DEL", r.key(false, ids[i])); err != nil {
 			return err
 		}
 	}
 
 	if len(expIDs) == 0 || len(ids) == 0 {
-		if err = c.Send("DEL", uKey); err != nil {
+		if _, err = c.Do("DEL", uKey); err != nil {
 			return err
 		}
 	}
 
-	return c.Send("EXEC")
+	_, err = c.Do("EXEC")
+
+	return err
 }
 
 // key prepares a key for the appropriate namespace.
@@ -273,4 +290,28 @@ func (r *RedisStore) key(user bool, v string) string {
 	}
 
 	return fmt.Sprintf("%s:%s:%s", r.prefix, namespace, v)
+}
+
+// parse converts a map of raw data into session structure.
+func parse(vv map[string]string) (sessionup.Session, error) {
+	s := sessionup.Session{
+		ID:      vv["id"],
+		UserKey: vv["user_key"],
+		IP:      net.ParseIP(vv["ip"]),
+	}
+	s.Agent.OS = vv["agent_os"]
+	s.Agent.Browser = vv["agent_browser"]
+
+	var err error
+	s.CreatedAt, err = time.Parse(time.RFC3339Nano, vv["created_at"])
+	if err != nil {
+		return sessionup.Session{}, err
+	}
+
+	s.ExpiresAt, err = time.Parse(time.RFC3339Nano, vv["expires_at"])
+	if err != nil {
+		return sessionup.Session{}, err
+	}
+
+	return s, nil
 }
