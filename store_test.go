@@ -27,8 +27,8 @@ func Test_RedisStore_Create(t *testing.T) {
 	inp := sessionup.Session{
 		UserKey:   "u123",
 		ID:        "id123",
-		ExpiresAt: time.Now().Add(time.Hour * 24),
-		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour * 24),
+		CreatedAt: time.Now().UTC(),
 		IP:        net.ParseIP("127.0.0.1"),
 	}
 	inp.Agent.OS = "gnu/linux"
@@ -216,7 +216,7 @@ func Test_RedisStore_Create(t *testing.T) {
 				conn := redigomock.NewConn()
 				conn.GenericCommand("MULTI")
 				conn.Command("ZREMRANGEBYSCORE", uKey, "-inf", redigomock.NewAnyInt())
-				conn.Command("PTTL", uKey).Expect(time.Now().Add(time.Hour * 72).UnixNano())
+				conn.Command("PTTL", uKey).Expect(time.Now().UTC().Add(time.Hour * 72).UnixNano())
 				conn.Command("ZADD", uKey, inp.ExpiresAt.UnixNano(), inp.ID)
 				conn.Command("PEXPIREAT", uKey, redigomock.NewAnyInt())
 				conn.Command(
@@ -309,8 +309,8 @@ func Test_RedisStore_FetchByID(t *testing.T) {
 	inp := sessionup.Session{
 		UserKey:   "u123",
 		ID:        "id123",
-		ExpiresAt: time.Now().Add(time.Hour * 24).Round(0),
-		CreatedAt: time.Now().Round(0),
+		ExpiresAt: time.Now().UTC().Add(time.Hour * 24).Round(0),
+		CreatedAt: time.Now().UTC().Round(0),
 		IP:        net.ParseIP("127.0.0.1"),
 	}
 	inp.Agent.OS = "gnu/linux"
@@ -454,8 +454,8 @@ func Test_RedisStore_FetchByUserKey(t *testing.T) {
 		s := sessionup.Session{
 			UserKey:   "u123",
 			ID:        "id" + strconv.Itoa(i),
-			ExpiresAt: time.Now().Add(time.Hour * 24).Round(0),
-			CreatedAt: time.Now().Round(0),
+			ExpiresAt: time.Now().UTC().Add(time.Hour * 24).Round(0),
+			CreatedAt: time.Now().UTC().Round(0),
 			IP:        net.ParseIP("127.0.0.1"),
 		}
 		s.Agent.OS = "gnu/linux"
@@ -696,8 +696,8 @@ func Test_RedisStore_DeleteByID(t *testing.T) {
 	inp := sessionup.Session{
 		UserKey:   "u123",
 		ID:        "id123",
-		ExpiresAt: time.Now().Add(time.Hour * 24).Round(0),
-		CreatedAt: time.Now().Round(0),
+		ExpiresAt: time.Now().UTC().Add(time.Hour * 24).Round(0),
+		CreatedAt: time.Now().UTC().Round(0),
 		IP:        net.ParseIP("127.0.0.1"),
 	}
 	inp.Agent.OS = "gnu/linux"
@@ -1223,8 +1223,8 @@ func Test_parse(t *testing.T) {
 	inp := sessionup.Session{
 		UserKey:   "u123",
 		ID:        "id123",
-		ExpiresAt: time.Now().Add(time.Hour * 24).Round(0),
-		CreatedAt: time.Now().Round(0),
+		ExpiresAt: time.Now().UTC().Add(time.Hour * 24).Round(0),
+		CreatedAt: time.Now().UTC().Round(0),
 		IP:        net.ParseIP("127.0.0.1"),
 	}
 	inp.Agent.OS = "gnu/linux"
