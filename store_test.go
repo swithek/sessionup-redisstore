@@ -40,7 +40,7 @@ func Test_RedisStore_Create(t *testing.T) {
 	cc := map[string]struct {
 		Cancelled bool
 		Conn      func() (*redigomock.Conn, func(*testing.T))
-		Err       bool
+		Err       error
 	}{
 		"Cancelled context": {
 			Cancelled: true,
@@ -51,7 +51,7 @@ func Test_RedisStore_Create(t *testing.T) {
 					assert.NoError(t, err)
 				}
 			},
-			Err: true,
+			Err: assert.AnError,
 		},
 		"Error returned during transaction creation": {
 			Conn: func() (*redigomock.Conn, func(*testing.T)) {
@@ -64,12 +64,41 @@ func Test_RedisStore_Create(t *testing.T) {
 					assert.NoError(t, err)
 				}
 			},
-			Err: true,
+			Err: assert.AnError,
+		},
+		"Error returned during session presence check": {
+			Conn: func() (*redigomock.Conn, func(*testing.T)) {
+				conn := redigomock.NewConn()
+				conn.GenericCommand("MULTI")
+				conn.Command("EXISTS", sKey).ExpectError(assert.AnError)
+				conn.GenericCommand("DISCARD")
+
+				return conn, func(t *testing.T) {
+					err := conn.ExpectationsWereMet()
+					assert.NoError(t, err)
+				}
+			},
+			Err: assert.AnError,
+		},
+		"Duplicate ID": {
+			Conn: func() (*redigomock.Conn, func(*testing.T)) {
+				conn := redigomock.NewConn()
+				conn.GenericCommand("MULTI")
+				conn.Command("EXISTS", sKey).Expect(int64(1))
+				conn.GenericCommand("DISCARD")
+
+				return conn, func(t *testing.T) {
+					err := conn.ExpectationsWereMet()
+					assert.NoError(t, err)
+				}
+			},
+			Err: sessionup.ErrDuplicateID,
 		},
 		"Error returned during cleanup in user session set": {
 			Conn: func() (*redigomock.Conn, func(*testing.T)) {
 				conn := redigomock.NewConn()
 				conn.GenericCommand("MULTI")
+				conn.Command("EXISTS", sKey).Expect(int64(0))
 				conn.Command("ZREMRANGEBYSCORE", uKey, "-inf", redigomock.NewAnyInt()).ExpectError(assert.AnError)
 				conn.GenericCommand("DISCARD")
 
@@ -78,12 +107,13 @@ func Test_RedisStore_Create(t *testing.T) {
 					assert.NoError(t, err)
 				}
 			},
-			Err: true,
+			Err: assert.AnError,
 		},
 		"Error returned during previous user key expiration fetch": {
 			Conn: func() (*redigomock.Conn, func(*testing.T)) {
 				conn := redigomock.NewConn()
 				conn.GenericCommand("MULTI")
+				conn.Command("EXISTS", sKey).Expect(int64(0))
 				conn.Command("ZREMRANGEBYSCORE", uKey, "-inf", redigomock.NewAnyInt())
 				conn.Command("PTTL", uKey).ExpectError(assert.AnError)
 				conn.GenericCommand("DISCARD")
@@ -93,15 +123,16 @@ func Test_RedisStore_Create(t *testing.T) {
 					assert.NoError(t, err)
 				}
 			},
-			Err: true,
+			Err: assert.AnError,
 		},
 		"Error returned during user session set update": {
 			Conn: func() (*redigomock.Conn, func(*testing.T)) {
 				conn := redigomock.NewConn()
 				conn.GenericCommand("MULTI")
+				conn.Command("EXISTS", sKey).Expect(int64(0))
 				conn.Command("ZREMRANGEBYSCORE", uKey, "-inf", redigomock.NewAnyInt())
 				conn.Command("PTTL", uKey).Expect(int64(20))
-				conn.Command("ZADD", uKey, inp.ExpiresAt.UnixNano(), inp.ID).ExpectError(assert.AnError)
+				conn.Command("ZADD", uKey, inp.ExpiresAt.UnixNano(), sKey).ExpectError(assert.AnError)
 				conn.GenericCommand("DISCARD")
 
 				return conn, func(t *testing.T) {
@@ -109,15 +140,16 @@ func Test_RedisStore_Create(t *testing.T) {
 					assert.NoError(t, err)
 				}
 			},
-			Err: true,
+			Err: assert.AnError,
 		},
 		"Error returned during user key expiration update": {
 			Conn: func() (*redigomock.Conn, func(*testing.T)) {
 				conn := redigomock.NewConn()
 				conn.GenericCommand("MULTI")
+				conn.Command("EXISTS", sKey).Expect(int64(0))
 				conn.Command("ZREMRANGEBYSCORE", uKey, "-inf", redigomock.NewAnyInt())
 				conn.Command("PTTL", uKey).Expect(int64(20))
-				conn.Command("ZADD", uKey, inp.ExpiresAt.UnixNano(), inp.ID)
+				conn.Command("ZADD", uKey, inp.ExpiresAt.UnixNano(), sKey)
 				conn.Command("PEXPIREAT", uKey, inp.ExpiresAt.UnixNano()/1000).ExpectError(assert.AnError)
 				conn.GenericCommand("DISCARD")
 
@@ -126,15 +158,16 @@ func Test_RedisStore_Create(t *testing.T) {
 					assert.NoError(t, err)
 				}
 			},
-			Err: true,
+			Err: assert.AnError,
 		},
 		"Error returned during session hash creation": {
 			Conn: func() (*redigomock.Conn, func(*testing.T)) {
 				conn := redigomock.NewConn()
 				conn.GenericCommand("MULTI")
+				conn.Command("EXISTS", sKey).Expect(int64(0))
 				conn.Command("ZREMRANGEBYSCORE", uKey, "-inf", redigomock.NewAnyInt())
 				conn.Command("PTTL", uKey).Expect(int64(20))
-				conn.Command("ZADD", uKey, inp.ExpiresAt.UnixNano(), inp.ID)
+				conn.Command("ZADD", uKey, inp.ExpiresAt.UnixNano(), sKey)
 				conn.Command("PEXPIREAT", uKey, inp.ExpiresAt.UnixNano()/1000)
 				conn.Command(
 					"HMSET", sKey,
@@ -153,15 +186,16 @@ func Test_RedisStore_Create(t *testing.T) {
 					assert.NoError(t, err)
 				}
 			},
-			Err: true,
+			Err: assert.AnError,
 		},
 		"Error returnde during session expiration creation": {
 			Conn: func() (*redigomock.Conn, func(*testing.T)) {
 				conn := redigomock.NewConn()
 				conn.GenericCommand("MULTI")
+				conn.Command("EXISTS", sKey).Expect(int64(0))
 				conn.Command("ZREMRANGEBYSCORE", uKey, "-inf", redigomock.NewAnyInt())
 				conn.Command("PTTL", uKey).Expect(int64(20))
-				conn.Command("ZADD", uKey, inp.ExpiresAt.UnixNano(), inp.ID)
+				conn.Command("ZADD", uKey, inp.ExpiresAt.UnixNano(), sKey)
 				conn.Command("PEXPIREAT", uKey, inp.ExpiresAt.UnixNano()/1000)
 				conn.Command(
 					"HMSET", sKey,
@@ -181,15 +215,16 @@ func Test_RedisStore_Create(t *testing.T) {
 					assert.NoError(t, err)
 				}
 			},
-			Err: true,
+			Err: assert.AnError,
 		},
 		"Error returned during transaction exec": {
 			Conn: func() (*redigomock.Conn, func(*testing.T)) {
 				conn := redigomock.NewConn()
 				conn.GenericCommand("MULTI")
+				conn.Command("EXISTS", sKey).Expect(int64(0))
 				conn.Command("ZREMRANGEBYSCORE", uKey, "-inf", redigomock.NewAnyInt())
 				conn.Command("PTTL", uKey).Expect(int64(20))
-				conn.Command("ZADD", uKey, inp.ExpiresAt.UnixNano(), inp.ID)
+				conn.Command("ZADD", uKey, inp.ExpiresAt.UnixNano(), sKey)
 				conn.Command("PEXPIREAT", uKey, inp.ExpiresAt.UnixNano()/1000)
 				conn.Command(
 					"HMSET", sKey,
@@ -209,15 +244,16 @@ func Test_RedisStore_Create(t *testing.T) {
 					assert.NoError(t, err)
 				}
 			},
-			Err: true,
+			Err: assert.AnError,
 		},
 		"Successful execution with previous user key expiration": {
 			Conn: func() (*redigomock.Conn, func(*testing.T)) {
 				conn := redigomock.NewConn()
 				conn.GenericCommand("MULTI")
+				conn.Command("EXISTS", sKey).Expect(int64(0))
 				conn.Command("ZREMRANGEBYSCORE", uKey, "-inf", redigomock.NewAnyInt())
 				conn.Command("PTTL", uKey).Expect(time.Now().UTC().Add(time.Hour * 72).UnixNano())
-				conn.Command("ZADD", uKey, inp.ExpiresAt.UnixNano(), inp.ID)
+				conn.Command("ZADD", uKey, inp.ExpiresAt.UnixNano(), sKey)
 				conn.Command("PEXPIREAT", uKey, redigomock.NewAnyInt())
 				conn.Command(
 					"HMSET", sKey,
@@ -242,9 +278,10 @@ func Test_RedisStore_Create(t *testing.T) {
 			Conn: func() (*redigomock.Conn, func(*testing.T)) {
 				conn := redigomock.NewConn()
 				conn.GenericCommand("MULTI")
+				conn.Command("EXISTS", sKey).Expect(int64(0))
 				conn.Command("ZREMRANGEBYSCORE", uKey, "-inf", redigomock.NewAnyInt())
 				conn.Command("PTTL", uKey).Expect(int64(20))
-				conn.Command("ZADD", uKey, inp.ExpiresAt.UnixNano(), inp.ID)
+				conn.Command("ZADD", uKey, inp.ExpiresAt.UnixNano(), sKey)
 				conn.Command("PEXPIREAT", uKey, inp.ExpiresAt.UnixNano()/1000)
 				conn.Command(
 					"HMSET", sKey,
@@ -294,13 +331,19 @@ func Test_RedisStore_Create(t *testing.T) {
 			}
 
 			err := r.Create(ctx, inp)
-			if c.Err {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
+			check(t)
+
+			if c.Err != nil {
+				if c.Err == assert.AnError {
+					assert.Error(t, err)
+					return
+				}
+
+				assert.Equal(t, c.Err, err)
+				return
 			}
 
-			check(t)
+			assert.NoError(t, err)
 		})
 	}
 }
@@ -514,11 +557,11 @@ func Test_RedisStore_FetchByUserKey(t *testing.T) {
 				conn := redigomock.NewConn()
 				conn.GenericCommand("MULTI")
 				conn.Command("ZRANGEBYSCORE", uKey, "-inf", "+inf").ExpectSlice(
-					inp[0].ID,
-					inp[1].ID,
-					inp[2].ID,
-					inp[3].ID,
-					inp[4].ID,
+					prefix+":session:"+inp[0].ID,
+					prefix+":session:"+inp[1].ID,
+					prefix+":session:"+inp[2].ID,
+					prefix+":session:"+inp[3].ID,
+					prefix+":session:"+inp[4].ID,
 				)
 
 				sKey := prefix + ":session:" + inp[0].ID
@@ -538,11 +581,11 @@ func Test_RedisStore_FetchByUserKey(t *testing.T) {
 				conn := redigomock.NewConn()
 				conn.GenericCommand("MULTI")
 				conn.Command("ZRANGEBYSCORE", uKey, "-inf", "+inf").ExpectSlice(
-					inp[0].ID,
-					inp[1].ID,
-					inp[2].ID,
-					inp[3].ID,
-					inp[4].ID,
+					prefix+":session:"+inp[0].ID,
+					prefix+":session:"+inp[1].ID,
+					prefix+":session:"+inp[2].ID,
+					prefix+":session:"+inp[3].ID,
+					prefix+":session:"+inp[4].ID,
 				)
 
 				sKey := prefix + ":session:" + inp[0].ID
@@ -570,11 +613,11 @@ func Test_RedisStore_FetchByUserKey(t *testing.T) {
 				conn := redigomock.NewConn()
 				conn.GenericCommand("MULTI")
 				conn.Command("ZRANGEBYSCORE", uKey, "-inf", "+inf").ExpectSlice(
-					inp[0].ID,
-					inp[1].ID,
-					inp[2].ID,
-					inp[3].ID,
-					inp[4].ID,
+					prefix+":session:"+inp[0].ID,
+					prefix+":session:"+inp[1].ID,
+					prefix+":session:"+inp[2].ID,
+					prefix+":session:"+inp[3].ID,
+					prefix+":session:"+inp[4].ID,
 				)
 
 				for i := 0; i < 5; i++ {
@@ -617,11 +660,11 @@ func Test_RedisStore_FetchByUserKey(t *testing.T) {
 				conn := redigomock.NewConn()
 				conn.GenericCommand("MULTI")
 				conn.Command("ZRANGEBYSCORE", uKey, "-inf", "+inf").ExpectSlice(
-					inp[0].ID,
-					inp[1].ID,
-					inp[2].ID,
-					inp[3].ID,
-					inp[4].ID,
+					prefix+":session:"+inp[0].ID,
+					prefix+":session:"+inp[1].ID,
+					prefix+":session:"+inp[2].ID,
+					prefix+":session:"+inp[3].ID,
+					prefix+":session:"+inp[4].ID,
 				)
 
 				for i := 0; i < 5; i++ {
@@ -1053,9 +1096,9 @@ func Test_RedisStore_DeleteByUserKey(t *testing.T) {
 				conn := redigomock.NewConn()
 				conn.GenericCommand("MULTI")
 				conn.Command("ZRANGEBYSCORE", inpFullKey, "-inf", "+inf").ExpectSlice(
-					"id111",
-					"id222",
-					"id333",
+					prefix+":session:id111",
+					prefix+":session:id222",
+					prefix+":session:id333",
 				)
 				conn.Command("DEL", prefix+":session:id111").ExpectError(assert.AnError)
 				conn.GenericCommand("DISCARD")
@@ -1072,9 +1115,9 @@ func Test_RedisStore_DeleteByUserKey(t *testing.T) {
 				conn := redigomock.NewConn()
 				conn.GenericCommand("MULTI")
 				conn.Command("ZRANGEBYSCORE", inpFullKey, "-inf", "+inf").ExpectSlice(
-					"id111",
-					"id222",
-					"id333",
+					prefix+":session:id111",
+					prefix+":session:id222",
+					prefix+":session:id333",
 				)
 				conn.Command("DEL", prefix+":session:id111")
 				conn.Command("DEL", prefix+":session:id222")
@@ -1094,9 +1137,9 @@ func Test_RedisStore_DeleteByUserKey(t *testing.T) {
 				conn := redigomock.NewConn()
 				conn.GenericCommand("MULTI")
 				conn.Command("ZRANGEBYSCORE", inpFullKey, "-inf", "+inf").ExpectSlice(
-					"id111",
-					"id222",
-					"id333",
+					prefix+":session:id111",
+					prefix+":session:id222",
+					prefix+":session:id333",
 				)
 				conn.Command("DEL", prefix+":session:id111")
 				conn.Command("DEL", prefix+":session:id222")
@@ -1116,9 +1159,9 @@ func Test_RedisStore_DeleteByUserKey(t *testing.T) {
 				conn := redigomock.NewConn()
 				conn.GenericCommand("MULTI")
 				conn.Command("ZRANGEBYSCORE", inpFullKey, "-inf", "+inf").ExpectSlice(
-					"id111",
-					"id222",
-					"id333",
+					prefix+":session:id111",
+					prefix+":session:id222",
+					prefix+":session:id333",
 				)
 				conn.Command("DEL", prefix+":session:id111")
 				conn.GenericCommand("EXEC")
@@ -1149,9 +1192,9 @@ func Test_RedisStore_DeleteByUserKey(t *testing.T) {
 				conn := redigomock.NewConn()
 				conn.GenericCommand("MULTI")
 				conn.Command("ZRANGEBYSCORE", inpFullKey, "-inf", "+inf").ExpectSlice(
-					"id111",
-					"id222",
-					"id333",
+					prefix+":session:id111",
+					prefix+":session:id222",
+					prefix+":session:id333",
 				)
 				conn.Command("DEL", prefix+":session:id111")
 				conn.Command("DEL", prefix+":session:id222")

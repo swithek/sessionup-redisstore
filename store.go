@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/gomodule/redigo/redis"
@@ -42,8 +43,20 @@ func (r *RedisStore) Create(ctx context.Context, s sessionup.Session) error {
 		return err
 	}
 
-	now := time.Now().UnixNano()
 	uKey := r.key(true, s.UserKey)
+	sKey := r.key(false, s.ID)
+
+	// check if session key is already present
+	v, err := redis.Int64(c.Do("EXISTS", sKey))
+	if err != nil {
+		return err
+	}
+
+	if v > 0 {
+		return sessionup.ErrDuplicateID
+	}
+
+	now := time.Now().UnixNano()
 
 	// remove expired sessions from user session set
 	_, err = c.Do("ZREMRANGEBYSCORE", uKey, "-inf", now)
@@ -65,8 +78,8 @@ func (r *RedisStore) Create(ctx context.Context, s sessionup.Session) error {
 		uExpMilli = sExpMilli
 	}
 
-	// add session to user session set
-	_, err = c.Do("ZADD", uKey, sExpNano, s.ID)
+	// add session key to user session set
+	_, err = c.Do("ZADD", uKey, sExpNano, sKey)
 	if err != nil {
 		return err
 	}
@@ -76,8 +89,6 @@ func (r *RedisStore) Create(ctx context.Context, s sessionup.Session) error {
 	if err != nil {
 		return err
 	}
-
-	sKey := r.key(false, s.ID)
 
 	// create session hash
 	_, err = c.Do(
@@ -159,7 +170,7 @@ func (r *RedisStore) FetchByUserKey(ctx context.Context, key string) ([]sessionu
 	var ss []sessionup.Session
 
 	for i := range ids {
-		vv, err := redis.StringMap(c.Do("HGETALL", r.key(false, ids[i])))
+		vv, err := redis.StringMap(c.Do("HGETALL", ids[i]))
 		if err != nil {
 			return nil, err
 		}
@@ -260,13 +271,15 @@ func (r *RedisStore) DeleteByUserKey(ctx context.Context, key string, expIDs ...
 
 Outer:
 	for i := range ids {
+		id := extract(ids[i])
+
 		for j := range expIDs {
-			if expIDs[j] == ids[i] {
+			if expIDs[j] == id {
 				continue Outer
 			}
 		}
 
-		if _, err = c.Do("DEL", r.key(false, ids[i])); err != nil {
+		if _, err = c.Do("DEL", ids[i]); err != nil {
 			return err
 		}
 	}
@@ -290,6 +303,16 @@ func (r *RedisStore) key(user bool, v string) string {
 	}
 
 	return fmt.Sprintf("%s:%s:%s", r.prefix, namespace, v)
+}
+
+// extract strips prefix and namespace data from the key.
+func extract(v string) string {
+	strs := strings.Split(v, ":")
+	if len(strs) != 3 {
+		return ""
+	}
+
+	return strs[2]
 }
 
 // parse converts a map of raw data into session structure.
