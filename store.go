@@ -39,12 +39,16 @@ func (r *RedisStore) Create(ctx context.Context, s sessionup.Session) error {
 
 	defer c.Close()
 
-	if _, err = c.Do("MULTI"); err != nil {
+	sKey := r.key(false, s.ID)
+	uKey := r.key(true, s.UserKey)
+
+	if _, err = c.Do("WATCH", sKey); err != nil {
 		return err
 	}
 
-	uKey := r.key(true, s.UserKey)
-	sKey := r.key(false, s.ID)
+	if _, err = c.Do("WATCH", uKey); err != nil {
+		return err
+	}
 
 	// check if session key is already present
 	v, err := redis.Int64(c.Do("EXISTS", sKey))
@@ -56,26 +60,30 @@ func (r *RedisStore) Create(ctx context.Context, s sessionup.Session) error {
 		return sessionup.ErrDuplicateID
 	}
 
-	now := time.Now().UnixNano()
-
-	// remove expired sessions from user session set
-	_, err = c.Do("ZREMRANGEBYSCORE", uKey, "-inf", now)
-	if err != nil {
-		return err
-	}
-
 	// find previous user session set's expiration time
 	uExpMilli, err := redis.Int64(c.Do("PTTL", uKey))
 	if err != nil {
 		return err
 	}
 
-	uExpMilli += now / 1000
+	now := time.Now().UnixNano()
+	uExpMilli += now / int64(time.Millisecond)
 	sExpNano := s.ExpiresAt.UnixNano()
-	sExpMilli := sExpNano / 1000
+	sExpMilli := sExpNano / int64(time.Millisecond)
 
 	if sExpMilli > uExpMilli {
 		uExpMilli = sExpMilli
+	}
+
+	// start transaction
+	if _, err = c.Do("MULTI"); err != nil {
+		return err
+	}
+
+	// remove expired sessions from user session set
+	_, err = c.Do("ZREMRANGEBYSCORE", uKey, "-inf", now)
+	if err != nil {
+		return err
 	}
 
 	// add session key to user session set
@@ -136,6 +144,10 @@ func (r *RedisStore) FetchByID(ctx context.Context, id string) (sessionup.Sessio
 		return sessionup.Session{}, false, err
 	}
 
+	if len(vv) == 0 {
+		return sessionup.Session{}, false, nil
+	}
+
 	s, err := parse(vv)
 	if err != nil {
 		return sessionup.Session{}, false, err
@@ -154,10 +166,6 @@ func (r *RedisStore) FetchByUserKey(ctx context.Context, key string) ([]sessionu
 
 	defer c.Close()
 
-	if _, err = c.Do("MULTI"); err != nil {
-		return nil, err
-	}
-
 	ids, err := redis.Strings(c.Do("ZRANGEBYSCORE", r.key(true, key), "-inf", "+inf"))
 	if err != nil {
 		if errors.Is(err, redis.ErrNil) {
@@ -172,7 +180,15 @@ func (r *RedisStore) FetchByUserKey(ctx context.Context, key string) ([]sessionu
 	for i := range ids {
 		vv, err := redis.StringMap(c.Do("HGETALL", ids[i]))
 		if err != nil {
+			if errors.Is(err, redis.ErrNil) {
+				continue
+			}
+
 			return nil, err
+		}
+
+		if len(vv) == 0 {
+			continue
 		}
 
 		s, err := parse(vv)
@@ -181,10 +197,6 @@ func (r *RedisStore) FetchByUserKey(ctx context.Context, key string) ([]sessionu
 		}
 
 		ss = append(ss, s)
-	}
-
-	if _, err = c.Do("EXEC"); err != nil {
-		return nil, err
 	}
 
 	return ss, nil
@@ -200,11 +212,11 @@ func (r *RedisStore) DeleteByID(ctx context.Context, id string) error {
 
 	defer c.Close()
 
-	if _, err = c.Do("MULTI"); err != nil {
+	sKey := r.key(false, id)
+
+	if _, err = c.Do("WATCH", sKey); err != nil {
 		return err
 	}
-
-	sKey := r.key(false, id)
 
 	vv, err := redis.StringMap(c.Do("HGETALL", sKey))
 	if err != nil {
@@ -215,22 +227,35 @@ func (r *RedisStore) DeleteByID(ctx context.Context, id string) error {
 		return err
 	}
 
+	if len(vv) == 0 {
+		return nil
+	}
+
 	s, err := parse(vv)
 	if err != nil {
 		return err
 	}
 
 	uKey := r.key(true, s.UserKey)
-	if _, err = c.Do("ZREM", uKey, sKey); err != nil {
+
+	if _, err = c.Do("WATCH", uKey); err != nil {
 		return err
 	}
 
-	count, err := redis.Int64(c.Do("ZCARD", uKey))
+	ids, err := redis.Strings(c.Do("ZRANGEBYSCORE", uKey, "-inf", "+inf"))
 	if err != nil {
 		return err
 	}
 
-	if count == 0 {
+	if _, err = c.Do("MULTI"); err != nil {
+		return err
+	}
+
+	if _, err = c.Do("ZREM", uKey, sKey); err != nil {
+		return err
+	}
+
+	if len(ids) == 1 && ids[0] == sKey {
 		if _, err = c.Do("DEL", uKey); err != nil {
 			return err
 		}
@@ -256,17 +281,21 @@ func (r *RedisStore) DeleteByUserKey(ctx context.Context, key string, expIDs ...
 
 	defer c.Close()
 
-	if _, err = c.Do("MULTI"); err != nil {
+	uKey := r.key(true, key)
+
+	if _, err = c.Do("WATCH", uKey); err != nil {
 		return err
 	}
-
-	uKey := r.key(true, key)
 
 	ids, err := redis.Strings(c.Do("ZRANGEBYSCORE", uKey, "-inf", "+inf"))
 	if err != nil {
 		if !errors.Is(err, redis.ErrNil) {
 			return err
 		}
+	}
+
+	if _, err = c.Do("MULTI"); err != nil {
+		return err
 	}
 
 Outer:
@@ -281,6 +310,12 @@ Outer:
 
 		if _, err = c.Do("DEL", ids[i]); err != nil {
 			return err
+		}
+
+		if len(expIDs) > 0 {
+			if _, err = c.Do("ZREM", uKey, ids[i]); err != nil {
+				return err
+			}
 		}
 	}
 
