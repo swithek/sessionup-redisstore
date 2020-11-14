@@ -108,6 +108,7 @@ func (r *RedisStore) Create(ctx context.Context, s sessionup.Session) error {
 		"ip", s.IP.String(),
 		"agent_os", s.Agent.OS,
 		"agent_browser", s.Agent.Browser,
+		"meta", metaToString(s.Meta),
 	)
 	if err != nil {
 		return err
@@ -356,6 +357,7 @@ func parse(vv map[string]string) (sessionup.Session, error) {
 		ID:      vv["id"],
 		UserKey: vv["user_key"],
 		IP:      net.ParseIP(vv["ip"]),
+		Meta:    metaFromString(vv["meta"]),
 	}
 	s.Agent.OS = vv["agent_os"]
 	s.Agent.Browser = vv["agent_browser"]
@@ -372,4 +374,35 @@ func parse(vv map[string]string) (sessionup.Session, error) {
 	}
 
 	return s, nil
+}
+
+// metaToString converts metadata map into string.
+func metaToString(mm map[string]string) string {
+	var b strings.Builder
+	for k, v := range mm {
+		b.WriteString(fmt.Sprintf("%s:%s;", k, v))
+	}
+
+	return b.String()
+}
+
+// metaFromString converts metadata string into map.
+func metaFromString(s string) map[string]string {
+	if s == "" {
+		return nil
+	}
+
+	meta := make(map[string]string)
+	mm := strings.Split(s, ";")
+
+	for _, m := range mm {
+		vv := strings.Split(m, ":")
+		if len(vv) != 2 {
+			continue
+		}
+
+		meta[vv[0]] = vv[1]
+	}
+
+	return meta
 }

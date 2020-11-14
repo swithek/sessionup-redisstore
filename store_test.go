@@ -30,6 +30,7 @@ func Test_RedisStore_Create(t *testing.T) {
 		ExpiresAt: time.Now().UTC().Add(time.Hour * 24),
 		CreatedAt: time.Now().UTC(),
 		IP:        net.ParseIP("127.0.0.1"),
+		Meta:      map[string]string{"test": "1"},
 	}
 	inp.Agent.OS = "gnu/linux"
 	inp.Agent.Browser = "firefox"
@@ -220,6 +221,7 @@ func Test_RedisStore_Create(t *testing.T) {
 					"ip", inp.IP.String(),
 					"agent_os", inp.Agent.OS,
 					"agent_browser", inp.Agent.Browser,
+					"meta", "test:1;",
 				).ExpectError(assert.AnError)
 				conn.GenericCommand("DISCARD")
 
@@ -230,7 +232,7 @@ func Test_RedisStore_Create(t *testing.T) {
 			},
 			Err: assert.AnError,
 		},
-		"Error returnde during session expiration creation": {
+		"Error returned during session expiration creation": {
 			Conn: func() (*redigomock.Conn, func(*testing.T)) {
 				conn := redigomock.NewConn()
 				conn.Command("WATCH", sKey)
@@ -250,6 +252,7 @@ func Test_RedisStore_Create(t *testing.T) {
 					"ip", inp.IP.String(),
 					"agent_os", inp.Agent.OS,
 					"agent_browser", inp.Agent.Browser,
+					"meta", "test:1;",
 				)
 				conn.Command("PEXPIREAT", sKey, inp.ExpiresAt.UnixNano()/int64(time.Millisecond)).ExpectError(assert.AnError)
 				conn.GenericCommand("DISCARD")
@@ -281,6 +284,7 @@ func Test_RedisStore_Create(t *testing.T) {
 					"ip", inp.IP.String(),
 					"agent_os", inp.Agent.OS,
 					"agent_browser", inp.Agent.Browser,
+					"meta", "test:1;",
 				)
 				conn.Command("PEXPIREAT", sKey, inp.ExpiresAt.UnixNano()/int64(time.Millisecond))
 				conn.GenericCommand("EXEC").ExpectError(assert.AnError)
@@ -312,6 +316,7 @@ func Test_RedisStore_Create(t *testing.T) {
 					"ip", inp.IP.String(),
 					"agent_os", inp.Agent.OS,
 					"agent_browser", inp.Agent.Browser,
+					"meta", "test:1;",
 				)
 				conn.Command("PEXPIREAT", sKey, inp.ExpiresAt.UnixNano()/int64(time.Millisecond))
 				conn.GenericCommand("EXEC")
@@ -342,6 +347,7 @@ func Test_RedisStore_Create(t *testing.T) {
 					"ip", inp.IP.String(),
 					"agent_os", inp.Agent.OS,
 					"agent_browser", inp.Agent.Browser,
+					"meta", "test:1;",
 				)
 				conn.Command("PEXPIREAT", sKey, inp.ExpiresAt.UnixNano()/int64(time.Millisecond))
 				conn.GenericCommand("EXEC")
@@ -405,6 +411,7 @@ func Test_RedisStore_FetchByID(t *testing.T) {
 		ExpiresAt: time.Now().UTC().Add(time.Hour * 24).Round(0),
 		CreatedAt: time.Now().UTC().Round(0),
 		IP:        net.ParseIP("127.0.0.1"),
+		Meta:      map[string]string{"test": "1", "": "val"},
 	}
 	inp.Agent.OS = "gnu/linux"
 	inp.Agent.Browser = "firefox"
@@ -452,6 +459,7 @@ func Test_RedisStore_FetchByID(t *testing.T) {
 					"ip":            inp.IP.String(),
 					"agent_os":      inp.Agent.OS,
 					"agent_browser": inp.Agent.Browser,
+					"meta":          "test:1;:val;",
 				})
 
 				return conn, func(t *testing.T) {
@@ -494,6 +502,7 @@ func Test_RedisStore_FetchByID(t *testing.T) {
 					"ip":            inp.IP.String(),
 					"agent_os":      inp.Agent.OS,
 					"agent_browser": inp.Agent.Browser,
+					"meta":          "test:1;:val;",
 				})
 
 				return conn, func(t *testing.T) {
@@ -561,6 +570,7 @@ func Test_RedisStore_FetchByUserKey(t *testing.T) {
 			ExpiresAt: time.Now().UTC().Add(time.Hour * 24).Round(0),
 			CreatedAt: time.Now().UTC().Round(0),
 			IP:        net.ParseIP("127.0.0.1"),
+			Meta:      map[string]string{"test": "1", "": "val"},
 		}
 		s.Agent.OS = "gnu/linux"
 		s.Agent.Browser = "firefox"
@@ -639,6 +649,7 @@ func Test_RedisStore_FetchByUserKey(t *testing.T) {
 					"ip":            inp[0].IP.String(),
 					"agent_os":      inp[0].Agent.OS,
 					"agent_browser": inp[0].Agent.Browser,
+					"meta":          "test:1;:val;",
 				})
 
 				return conn, func(t *testing.T) {
@@ -682,6 +693,7 @@ func Test_RedisStore_FetchByUserKey(t *testing.T) {
 						"ip":            inp[i].IP.String(),
 						"agent_os":      inp[i].Agent.OS,
 						"agent_browser": inp[i].Agent.Browser,
+						"meta":          "test:1;:val;",
 					})
 				}
 
@@ -748,6 +760,7 @@ func Test_RedisStore_DeleteByID(t *testing.T) {
 		ExpiresAt: time.Now().UTC().Add(time.Hour * 24).Round(0),
 		CreatedAt: time.Now().UTC().Round(0),
 		IP:        net.ParseIP("127.0.0.1"),
+		Meta:      map[string]string{"test": "1", "": "val"},
 	}
 	inp.Agent.OS = "gnu/linux"
 	inp.Agent.Browser = "firefox"
@@ -810,6 +823,7 @@ func Test_RedisStore_DeleteByID(t *testing.T) {
 					"ip":            inp.IP.String(),
 					"agent_os":      inp.Agent.OS,
 					"agent_browser": inp.Agent.Browser,
+					"meta":          "test:1;:val;",
 				})
 				conn.GenericCommand("UNWATCH")
 
@@ -832,6 +846,7 @@ func Test_RedisStore_DeleteByID(t *testing.T) {
 					"ip":            inp.IP.String(),
 					"agent_os":      inp.Agent.OS,
 					"agent_browser": inp.Agent.Browser,
+					"meta":          "test:1;:val;",
 				})
 				conn.Command("WATCH", uKey).ExpectError(assert.AnError)
 				conn.GenericCommand("UNWATCH")
@@ -855,6 +870,7 @@ func Test_RedisStore_DeleteByID(t *testing.T) {
 					"ip":            inp.IP.String(),
 					"agent_os":      inp.Agent.OS,
 					"agent_browser": inp.Agent.Browser,
+					"meta":          "test:1;:val;",
 				})
 				conn.Command("WATCH", uKey)
 				conn.Command("ZRANGEBYSCORE", uKey, "-inf", "+inf").ExpectError(assert.AnError)
@@ -879,6 +895,7 @@ func Test_RedisStore_DeleteByID(t *testing.T) {
 					"ip":            inp.IP.String(),
 					"agent_os":      inp.Agent.OS,
 					"agent_browser": inp.Agent.Browser,
+					"meta":          "test:1;:val;",
 				})
 				conn.Command("WATCH", uKey)
 				conn.Command("ZRANGEBYSCORE", uKey, "-inf", "+inf").ExpectSlice("123")
@@ -904,6 +921,7 @@ func Test_RedisStore_DeleteByID(t *testing.T) {
 					"ip":            inp.IP.String(),
 					"agent_os":      inp.Agent.OS,
 					"agent_browser": inp.Agent.Browser,
+					"meta":          "test:1;:val;",
 				})
 				conn.Command("WATCH", uKey)
 				conn.Command("ZRANGEBYSCORE", uKey, "-inf", "+inf").ExpectSlice("123")
@@ -930,6 +948,7 @@ func Test_RedisStore_DeleteByID(t *testing.T) {
 					"ip":            inp.IP.String(),
 					"agent_os":      inp.Agent.OS,
 					"agent_browser": inp.Agent.Browser,
+					"meta":          "test:1;:val;",
 				})
 				conn.Command("WATCH", uKey)
 				conn.Command("ZRANGEBYSCORE", uKey, "-inf", "+inf").ExpectSlice(sKey)
@@ -957,6 +976,7 @@ func Test_RedisStore_DeleteByID(t *testing.T) {
 					"ip":            inp.IP.String(),
 					"agent_os":      inp.Agent.OS,
 					"agent_browser": inp.Agent.Browser,
+					"meta":          "test:1;:val;",
 				})
 				conn.Command("WATCH", uKey)
 				conn.Command("ZRANGEBYSCORE", uKey, "-inf", "+inf").ExpectSlice("111", "222")
@@ -984,6 +1004,7 @@ func Test_RedisStore_DeleteByID(t *testing.T) {
 					"ip":            inp.IP.String(),
 					"agent_os":      inp.Agent.OS,
 					"agent_browser": inp.Agent.Browser,
+					"meta":          "test:1;:val;",
 				})
 				conn.Command("WATCH", uKey)
 				conn.Command("ZRANGEBYSCORE", uKey, "-inf", "+inf").ExpectSlice("111", "222")
@@ -1037,6 +1058,7 @@ func Test_RedisStore_DeleteByID(t *testing.T) {
 					"ip":            inp.IP.String(),
 					"agent_os":      inp.Agent.OS,
 					"agent_browser": inp.Agent.Browser,
+					"meta":          "test:1;:val;",
 				})
 				conn.Command("WATCH", uKey)
 				conn.Command("ZRANGEBYSCORE", uKey, "-inf", "+inf").ExpectSlice(sKey)
@@ -1064,6 +1086,7 @@ func Test_RedisStore_DeleteByID(t *testing.T) {
 					"ip":            inp.IP.String(),
 					"agent_os":      inp.Agent.OS,
 					"agent_browser": inp.Agent.Browser,
+					"meta":          "test:1;:val;",
 				})
 				conn.Command("WATCH", uKey)
 				conn.Command("ZRANGEBYSCORE", uKey, "-inf", "+inf").ExpectSlice("111")
@@ -1090,6 +1113,7 @@ func Test_RedisStore_DeleteByID(t *testing.T) {
 					"ip":            inp.IP.String(),
 					"agent_os":      inp.Agent.OS,
 					"agent_browser": inp.Agent.Browser,
+					"meta":          "test:1;:val;",
 				})
 				conn.Command("WATCH", uKey)
 				conn.Command("ZRANGEBYSCORE", uKey, "-inf", "+inf").ExpectSlice("111", "222")
@@ -1491,4 +1515,24 @@ func Test_parse(t *testing.T) {
 			assert.Equal(t, inp, res)
 		})
 	}
+}
+
+func Test_metaToString(t *testing.T) {
+	assert.Zero(t, metaToString(nil))
+
+	m := map[string]string{"": "1", "key": "", "test1": "2", "3": "", "hello": "hello"}
+	s := metaToString(m)
+	assert.Contains(t, s, ":1;")
+	assert.Contains(t, s, "test1:2;")
+	assert.Contains(t, s, "key:;")
+	assert.Contains(t, s, "hello:hello;")
+}
+
+func Test_metaFromString(t *testing.T) {
+	m := metaFromString("")
+	assert.Nil(t, m)
+
+	s := "test:1;:;3:3;"
+	m = metaFromString(s)
+	assert.Equal(t, map[string]string{"test": "1", "": "", "3": "3"}, m)
 }
